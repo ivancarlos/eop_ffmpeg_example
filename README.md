@@ -1,234 +1,35 @@
-Alexander Stepanov (Александр Степанов) é o criador da STL (Standard Template Library) do C++ e pai do conceito de “generic programming”.
+Sim, conheço bem a técnica EOP (Elements of Programming)! Alexander Stepanov, junto com Paul McJones, formalizou esses princípios no livro "Elements of Programming" (2009), que estabelece fundamentos matemáticos rigorosos para programação genérica.
 
-A técnica que ele chama de “Elements of Programming” (EOP) consiste em:
+Vou refatorar seu código seguindo mais fielmente os princípios EOP:## Principais diferenças seguindo princípios EOP:
 
-1.  Identificar os conceitos (semântica formal) que os tipos devem satisfazer.  
-2.  Escrever algoritmos genéricos que trabalham sobre esses conceitos, não sobre tipos concretos.  
-3.  Garantir complexidade e corretude via pré-condições, pós-condições e invariantes.  
-4.  Usar iteradores como interface mínima entre algoritmos e estruturas.
+### 1. **Tipos Regulares (Regular Types)**
+- `Frame` agora é totalmente copiável com semântica de valor
+- Implementa todos os operadores necessários (==, !=)
+- Estado vazio válido e bem definido
 
-A seguir um exemplo completo que captura exatamente um frame (o frame 150) de um vídeo qualquer usando FFmpeg e segue o estilo EOP:  
-- Conceito `FrameSource` (abstração que pode produzir um `AVFrame *`).  
-- Algoritmo genérico `get_nth_frame` que funciona para qualquer tipo que satisfaça `FrameSource`.  
-- Código sem `new`/`delete` manual, com RAII e verificações de erro.
+### 2. **Separação de Conceitos**
+- **Range**: `VideoFrameRange` encapsula a sequência
+- **Iterator**: implementação limpa separada do container
+- **Algoritmos**: `nth_value` opera sobre conceitos abstratos
 
----
+### 3. **Invariantes Claros**
+- Cada função documenta pré/pós-condições
+- Estados válidos explícitos
+- Loops com invariantes comentados
 
-Arquivos
+### 4. **Composição ao invés de Hierarquia**
+- Usa `shared_ptr` para compartilhar estado entre iteradores
+- Policy-based design (`AVFrameDeleter`)
+- Sem herança desnecessária
 
-CMakeLists.txt
+### 5. **Algoritmos Genéricos**
+- `nth_value` funciona com qualquer `InputIterator`
+- Não depende de tipos concretos
+- Complexidade documentada
 
-```cmake
-cmake_minimum_required(VERSION 3.16)
-project(get_frame LANGUAGES CXX)
+### 6. **Abstração de Sequências**
+- Range como par de iteradores [begin, end)
+- Interface limpa e minimalista
+- Iterator "end" bem definido
 
-set(CMAKE_CXX_STANDARD 17)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBAV REQUIRED
-    libavformat>=58
-    libavcodec>=58
-    libavutil>=56
-    libswscale>=5)
-
-add_executable(get_frame get_frame.cpp)
-target_include_directories(get_frame PRIVATE ${LIBAV_INCLUDE_DIRS})
-target_link_libraries(get_frame PRIVATE ${LIBAV_LIBRARIES})
-```
-
-get_frame.cpp
-
-```cpp
-/*
- *  EOP-style single-frame extractor
- *  g++ (ou cmake) + FFmpeg
- *  Uso: ./get_frame video.mp4 150 out.ppm
- */
-
-#include <cstdlib>
-#include <iostream>
-#include <string>
-#include <stdexcept>
-#include <memory>
-
-extern "C" {
-#include <libavformat/avformat.h>
-#include <libavcodec/avcodec.h>
-#include <libswscale/swscale.h>
-#include <libavutil/imgutils.h>
-}
-
-/* ---------- Conceitos (EOP) ---------- */
-
-// T satisfaz FrameSource se possuir:
-//   - open()  -> bool
-//   - read()  -> AVFrame*
-//   - close() -> void
-// (definido informalmente aqui)
-
-/* ---------- Abstração genérica ---------- */
-
-template <typename Src>
-AVFrame* get_nth_frame(Src& src, std::size_t n)
-{
-    if (!src.open()) throw std::runtime_error("cannot open source");
-
-    AVFrame* fr = nullptr;
-    for (std::size_t i = 0; i <= n; ++i) {
-        fr = src.read();          // pode retornar nullptr (EOF)
-        if (!fr) break;
-    }
-    src.close();
-    return fr;
-}
-
-/* ---------- Modelo concreto que satisfaz FrameSource ---------- */
-
-class VideoFile {
-public:
-    explicit VideoFile(const std::string& path) : path_(path) {}
-
-    bool open()
-    {
-        if (avformat_open_input(&fmt_, path_.c_str(), nullptr, nullptr) < 0)
-            return false;
-        if (avformat_find_stream_info(fmt_, nullptr) < 0)
-            return false;
-
-        for (unsigned i = 0; i < fmt_->nb_streams; ++i)
-            if (fmt_->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-                stream_index_ = static_cast<int>(i);
-                break;
-            }
-        if (stream_index_ == -1) return false;
-
-        const AVCodec* codec = avcodec_find_decoder(
-            fmt_->streams[stream_index_]->codecpar->codec_id);
-        if (!codec) return false;
-
-        codec_ctx_ = avcodec_alloc_context3(codec);
-        if (!codec_ctx_) return false;
-        avcodec_parameters_to_context(
-            codec_ctx_, fmt_->streams[stream_index_]->codecpar);
-        if (avcodec_open2(codec_ctx_, codec, nullptr) < 0) return false;
-
-        frame_ = av_frame_alloc();
-        pkt_   = av_packet_alloc();
-        return true;
-    }
-
-    AVFrame* read()   // retorna nullptr em EOF ou erro
-    {
-        while (av_read_frame(fmt_, pkt_) >= 0) {
-            if (pkt_->stream_index != stream_index_) {
-                av_packet_unref(pkt_);
-                continue;
-            }
-            int ret = avcodec_send_packet(codec_ctx_, pkt_);
-            av_packet_unref(pkt_);
-            if (ret < 0) continue;
-
-            ret = avcodec_receive_frame(codec_ctx_, frame_);
-            if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-                continue;
-            if (ret < 0) return nullptr;
-            return frame_;   // devolve ponteiro "vivo" (não copia)
-        }
-        return nullptr;
-    }
-
-    void close()
-    {
-        if (pkt_)   av_packet_free(&pkt_);
-        if (frame_) av_frame_free(&frame_);
-        if (codec_ctx_) avcodec_free_context(&codec_ctx_);
-        if (fmt_)   avformat_close_input(&fmt_);
-    }
-
-    ~VideoFile() { close(); }
-
-private:
-    std::string path_;
-    AVFormatContext* fmt_{nullptr};
-    AVCodecContext*  codec_ctx_{nullptr};
-    AVFrame* frame_{nullptr};
-    AVPacket* pkt_{nullptr};
-    int stream_index_{-1};
-};
-
-/* ---------- Salva frame como PPM ---------- */
-
-void save_ppm(const AVFrame* fr, const std::string& out)
-{
-    if (!fr) return;
-    FILE* f = std::fopen(out.c_str(), "wb");
-    if (!f) throw std::runtime_error("cannot open output");
-
-    // Converte para RGB24
-    SwsContext* sws = sws_getContext(
-        fr->width, fr->height, static_cast<AVPixelFormat>(fr->format),
-        fr->width, fr->height, AV_PIX_FMT_RGB24,
-        SWS_BILINEAR, nullptr, nullptr, nullptr);
-
-    AVFrame* rgb = av_frame_alloc();
-    rgb->format = AV_PIX_FMT_RGB24;
-    rgb->width  = fr->width;
-    rgb->height = fr->height;
-    av_frame_get_buffer(rgb, 0);
-
-    sws_scale(sws, fr->data, fr->linesize, 0, fr->height,
-              rgb->data, rgb->linesize);
-    sws_freeContext(sws);
-
-    fprintf(f, "P6\n%d %d\n255\n", fr->width, fr->height);
-    for (int y = 0; y < fr->height; ++y)
-        std::fwrite(rgb->data[0] + y * rgb->linesize[0], 1, fr->width * 3, f);
-
-    std::fclose(f);
-    av_frame_free(&rgb);
-}
-
-/* ---------- main ---------- */
-
-int main(int argc, char* argv[])
-{
-    if (argc != 4) {
-        std::cerr << "uso: " << argv[0] << " video.mp4 numero_frame out.ppm\n";
-        return EXIT_FAILURE;
-    }
-    av_log_set_level(AV_LOG_QUIET);   // menos barulho
-
-    VideoFile vf(argv[1]);
-    AVFrame* fr = get_nth_frame(vf, std::stoul(argv[2]));
-    if (!fr) {
-        std::cerr << "frame não encontrado\n";
-        return EXIT_FAILURE;
-    }
-    save_ppm(fr, argv[3]);
-    std::cout << "frame salvo em " << argv[3] << '\n';
-    return EXIT_SUCCESS;
-}
-```
-
----
-
-Build & Run
-
-```bash
-sudo apt install libavformat-dev libavcodec-dev libavutil-dev libswscale-dev
-mkdir build && cd build
-cmake .. && cmake --build .
-./get_frame ../video.mp4 150 frame150.ppm
-```
-
----
-
-O que o código ilustra (EOP)
-
-1.  Conceito genérico: `get_nth_frame` não sabe que está lendo vídeo; poderia ser uma webcam, uma stream RTP, ou até frames em disco – basta implementar a “interface” mínima.  
-2.  Algoritmo estável: complexidade O(n) em frames, sem cópias desnecessárias.  
-3.  Corretude: pré-condição explícita (`src.open()` deve retornar `true`), pós-condição (frame ou `nullptr`), liberação automática de recursos.  
-4.  Separar algoritmo da representação: se amanhã quiser trocar FFmpeg por GStreamer, basta escrever outro modelo que satisfaça `FrameSource`; `get_nth_frame` continua idêntico.
-
-É exatamente esse estilo – algoritmos desacoplados de estruturas, validados por conceitos – que Alexander Stepanov prega desde os anos 90 e descreve em “Elements of Programming”.
-
-
+Essa abordagem reflete a filosofia de Stepanov: **componentes genéricos, matematicamente fundamentados, que podem ser compostos livremente**.
