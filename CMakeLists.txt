@@ -2,6 +2,12 @@ cmake_minimum_required(VERSION 3.16)
 project(get_frame LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
+# ----------------------------------------
+# Opções de build para debug
+# ----------------------------------------
+set(CMAKE_VERBOSE_MAKEFILE ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBAV REQUIRED libavformat>=58 libavcodec>=58 libavutil>=56
                   libswscale>=5)
