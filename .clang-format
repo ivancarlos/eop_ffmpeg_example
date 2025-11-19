@@ -1,0 +1,39 @@
+# M4: Configuração ClangFormat para o estilo do código
+BasedOnStyle: LLVM
+# Indentação
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 68
+# Quebras de linha
+AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments: Consecutive
+AlignConsecutiveDeclarations: Consecutive
+AlignOperands: Align
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AlwaysBreakAfterReturnType: None
+BreakBeforeBraces: Allman
+BinPackParameters: false
+BinPackArguments: false
+# Espaçamento
+SpaceAfterCStyleCast: false
+SpaceBeforeParens: Never
+SpaceInEmptyParentheses: false
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+SpacesInCStyleCastParentheses: false
+# Alinhamento de parâmetros e argumentos
+AlignConsecutiveMacros: Consecutive
+MaxEmptyLinesToKeep: 2
+# Ponteiros e referências
+PointerAlignment: Left
+DerivePointerAlignment: false
+# Comentários
+ReflowComments: true
+SpacesBeforeTrailingComments: 2
+# Includes
+SortIncludes: false
+# Outras configurações
+KeepEmptyLinesAtTheStartOfBlocks: true
